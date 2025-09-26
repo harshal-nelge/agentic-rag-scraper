@@ -56,36 +56,22 @@ class CompanyRAG:
     def setup_chromadb(self):
         """Initialize ChromaDB for persistent vector storage."""
         try:
-            # Create a persistent ChromaDB directory
             self.chroma_persist_directory = "./chroma_db"
-            
-            # Ensure the directory exists
             os.makedirs(self.chroma_persist_directory, exist_ok=True)
             
-            st.info("🗄️ ChromaDB initialized with persistent storage")
-            
-        except Exception as e:
-            st.warning(f"ChromaDB initialization failed: {e}")
+        except Exception:
             self.chroma_persist_directory = None
     
     def company_name_to_url(self, company_name):
         """Convert company name to URL using Groq."""
-        # Debug: Show what company name we received
-        st.info(f"🔍 Converting company name: '{company_name}'")
-        
         if not self.groq_enabled:
-            # Fallback: simple URL generation
             clean_name = re.sub(r'[^a-zA-Z0-9\s]', '', company_name.lower())
             clean_name = clean_name.replace(' ', '').strip()
             
-            # Ensure we have a valid name
             if len(clean_name) < 2:
                 clean_name = company_name.lower().replace(' ', '').replace('-', '')
             
-            # Show the generated URL for debugging
-            generated_url = f"https://www.{clean_name}.com"
-            st.info(f"🔗 Generated URL (fallback): {generated_url}")
-            return generated_url
+            return f"https://www.{clean_name}.com"
         
         try:
             prompt = ChatPromptTemplate.from_messages([
@@ -120,50 +106,25 @@ class CompanyRAG:
             result = chain.invoke({"company_name": company_name})
             
             response_content = result.content.strip()
-            st.info(f"🤖 Groq response: {response_content}")
             
             try:
-                # Parse JSON response
                 json_response = json.loads(response_content)
                 url = json_response.get('url', '')
                 
-                if url:
-                    st.info(f"🔗 Extracted URL: {url}")
+                if url and url.startswith('http') and '.' in url and self.validate_url(url):
+                    return url
                     
-                    # Validate URL format
-                    if url.startswith('http') and '.' in url and self.validate_url(url):
-                        return url
-                    else:
-                        # Fallback with warning
-                        st.warning(f"⚠️ Groq generated invalid URL: {url}, using fallback")
-                        clean_name = re.sub(r'[^a-zA-Z0-9\s]', '', company_name.lower())
-                        clean_name = clean_name.replace(' ', '').strip()
-                        fallback_url = f"https://www.{clean_name}.com"
-                        st.info(f"🔗 Fallback URL: {fallback_url}")
-                        return fallback_url
-                else:
-                    raise ValueError("No URL found in JSON response")
-                    
-            except (json.JSONDecodeError, ValueError) as e:
-                st.warning(f"⚠️ Failed to parse JSON response: {e}")
-                # Try to extract URL from raw response as fallback
+            except (json.JSONDecodeError, ValueError):
                 if response_content.startswith('http') and '.' in response_content:
-                    url = response_content
-                    st.info(f"🔗 Using raw response as URL: {url}")
-                    if self.validate_url(url):
-                        return url
+                    if self.validate_url(response_content):
+                        return response_content
                 
-                # Final fallback
-                st.warning("Using name-based fallback URL")
-                clean_name = re.sub(r'[^a-zA-Z0-9\s]', '', company_name.lower())
-                clean_name = clean_name.replace(' ', '').strip()
-                fallback_url = f"https://www.{clean_name}.com"
-                st.info(f"🔗 Fallback URL: {fallback_url}")
-                return fallback_url
-                
-        except Exception as e:
-            st.warning(f"URL generation failed: {e}")
             # Fallback
+            clean_name = re.sub(r'[^a-zA-Z0-9\s]', '', company_name.lower())
+            clean_name = clean_name.replace(' ', '').strip()
+            return f"https://www.{clean_name}.com"
+                
+        except Exception:
             clean_name = re.sub(r'[^a-zA-Z0-9\s]', '', company_name.lower())
             clean_name = clean_name.replace(' ', '')
             return f"https://www.{clean_name}.com"
@@ -192,11 +153,8 @@ class CompanyRAG:
     def scrape_company_data(self, url):
         """Scrape company data from URL using WebBaseLoader with Selenium backup."""
         try:
-            # Validate URL first
             if not self.validate_url(url):
                 return None, "Invalid URL format. Please check the URL and try again."
-            
-            st.info(f"🔍 Loading data from: {url}")
             
             # Try WebBaseLoader first
             try:
@@ -233,17 +191,11 @@ class CompanyRAG:
                     chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
                     text = ' '.join(chunk for chunk in chunks if chunk and len(chunk) > 3)
                     
-                    # Check if we got meaningful content
                     if len(text.strip()) > 100:
-                        # Show preview of scraped content for debugging
-                        preview = text[:500] + "..." if len(text) > 500 else text
-                        st.info(f"📝 Content preview: {preview}")
-                        
-                        # Limit text size
                         if len(text) > 50000:
                             text = text[:50000]
                         
-                        st.success(f"✅ Successfully loaded {len(text)} characters with WebBaseLoader")
+                        st.success(f"✅ Successfully loaded {len(text)} characters")
                         return text, None
                     else:
                         raise Exception("No meaningful content extracted")
@@ -257,9 +209,6 @@ class CompanyRAG:
                 if any(ssl_indicator in error_msg.lower() for ssl_indicator in 
                        ["ssl", "certificate", "cannot connect to host", "certificate_verify_failed"]):
                     
-                    st.warning(f"⚠️ WebBaseLoader failed ({error_msg[:100]}...), trying Selenium backup...")
-                    
-                    # Use Selenium scraper as backup
                     scraper = WebScraper(delay=1.0, max_retries=2, timeout=30)
                     
                     try:
@@ -285,17 +234,11 @@ class CompanyRAG:
                             chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
                             text = ' '.join(chunk for chunk in chunks if chunk and len(chunk) > 3)
                             
-                            # Check if we got meaningful content
                             if len(text.strip()) > 100:
-                                # Show preview of scraped content for debugging
-                                preview = text[:500] + "..." if len(text) > 500 else text
-                                st.info(f"📝 Selenium content preview: {preview}")
-                                
-                                # Limit text size
                                 if len(text) > 50000:
                                     text = text[:50000]
                                 
-                                st.success(f"✅ Successfully loaded {len(text)} characters with Selenium backup")
+                                st.success(f"✅ Successfully loaded {len(text)} characters with Selenium")
                                 return text, None
                             else:
                                 return None, f"❌ Selenium backup extracted insufficient content from {url}"
@@ -306,7 +249,6 @@ class CompanyRAG:
                         return None, f"❌ Both WebBaseLoader and Selenium failed. WebLoader: {error_msg[:100]}... Selenium: {str(selenium_error)[:100]}..."
                     
                     finally:
-                        # Clean up scraper resources
                         scraper.close()
                 
                 else:
@@ -327,8 +269,6 @@ class CompanyRAG:
             if not self.gemini_api_key:
                 return "Google Gemini API key not found. Please add GEMINI_API_KEY to your .env file."
             
-            st.info("📊 Processing and storing company data...")
-            
             # Split text into chunks
             text_splitter = RecursiveCharacterTextSplitter(
                 chunk_size=2000,
@@ -341,32 +281,21 @@ class CompanyRAG:
             if not chunks:
                 return "No meaningful text found to process."
             
-            # Debug: Show chunk information
-            st.info(f"📊 Created {len(chunks)} text chunks")
-            if chunks:
-                first_chunk_preview = chunks[0][:200] + "..." if len(chunks[0]) > 200 else chunks[0]
-                st.info(f"📝 First chunk preview: {first_chunk_preview}")
-            
-            # Create vector store with persistent storage
             collection_name = f"company_{company_name.lower().replace(' ', '_').replace('-', '_')}"
             
             if self.chroma_persist_directory:
-                # Use persistent ChromaDB
                 self.vectorstore = Chroma.from_texts(
                     chunks, 
                     embedding=self.embeddings,
                     collection_name=collection_name,
                     persist_directory=self.chroma_persist_directory
                 )
-                st.info(f"📊 Data stored in persistent ChromaDB collection: {collection_name}")
             else:
-                # Fallback to in-memory ChromaDB
                 self.vectorstore = Chroma.from_texts(
                     chunks, 
                     embedding=self.embeddings,
                     collection_name=collection_name
                 )
-                st.warning("⚠️ Using in-memory ChromaDB (data will be lost on restart)")
             
             self.current_company = company_name
             
@@ -384,22 +313,12 @@ class CompanyRAG:
             if not self.groq_enabled:
                 return "Groq API key not found or setup failed."
             
-            # Search for relevant documents
             docs = self.vectorstore.similarity_search(query=query, k=3)
             
             if not docs:
                 return "No relevant information found for your query."
             
-            # Debug: Show retrieved context
-            st.info(f"🔍 Retrieved {len(docs)} relevant chunks for query")
-            for i, doc in enumerate(docs):
-                preview = doc.page_content[:150] + "..." if len(doc.page_content) > 150 else doc.page_content
-                st.info(f"📄 Chunk {i+1}: {preview}")
-            
-            # Create QA chain
             chain = load_qa_chain(llm=self.groq_llm, chain_type="stuff")
-            
-            # Get response
             response = chain.run(input_documents=docs, question=query)
             
             return response
@@ -447,8 +366,8 @@ class CompanyRAG:
                 self.current_company = company_name
                 return True
             
-        except Exception as e:
-            st.warning(f"Could not load existing collection: {e}")
+        except Exception:
+            pass
         
         return False
     
@@ -491,8 +410,7 @@ def main():
         - Vector storage & similarity search
         - Q&A with company data
         
-        ## 👨‍💻 By Harshal Nelge
-        - [LinkedIn](https://www.linkedin.com/in/harshal-nelge-3a35a6252/)
+        ## 👨‍💻 Developed by Harshal Nelge
         ''')
         
         # API Key Status
@@ -545,8 +463,7 @@ def main():
             "Apple"
         ]
         
-        # Add note about known working companies
-        st.caption("💡 These are verified working companies")
+        st.caption("💡 Verified working examples")
         
         for example in examples:
             if st.button(f"📌 {example}", key=f"ex_{example}"):

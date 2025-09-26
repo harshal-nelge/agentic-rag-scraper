@@ -1,4 +1,3 @@
-
 import os
 import sys
 import csv
@@ -17,20 +16,16 @@ import gspread
 from google.oauth2.service_account import Credentials
 from langchain_community.document_loaders import WebBaseLoader
 from bs4 import BeautifulSoup
-
-# Import scraper
 from scraper import WebScraper
-
-# AI imports
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
+
 try:
     from pydantic.v1 import BaseModel, Field
 except ImportError:
     from pydantic import BaseModel, Field
 
-# Load environment variables
 load_dotenv()
 
 class CompanyData(BaseModel):
@@ -59,8 +54,6 @@ class ObserveNowScraper:
         self.scraper = WebScraper(delay=1.0, max_retries=3, timeout=30)
         self.setup_ai()
         self.setup_google_sheets()
-        
-        # Statistics
         self.stats = {
             'urls_processed': 0,
             'successful_scrapes': 0,
@@ -78,10 +71,7 @@ class ObserveNowScraper:
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(log_file),
-                logging.StreamHandler(sys.stdout)
-            ]
+            handlers=[logging.FileHandler(log_file)]
         )
         self.logger = logging.getLogger(__name__)
     
@@ -89,7 +79,6 @@ class ObserveNowScraper:
         """Setup ChatGroq AI model."""
         self.ai_enabled = False
         
-        # Check if GROQ_API_KEY exists in environment
         if os.getenv('GROQ_API_KEY'):
             try:
                 self.llm = ChatGroq(
@@ -98,12 +87,10 @@ class ObserveNowScraper:
                     max_tokens=None,
                     timeout=None,
                     max_retries=2
-                    # API key will be automatically detected from GROQ_API_KEY env var
                 )
                 
                 self.parser = JsonOutputParser(pydantic_object=CompanyData)
                 
-                # Create extraction prompt
                 self.extraction_prompt = ChatPromptTemplate.from_messages([
                     (
                         "system",
@@ -147,33 +134,23 @@ Return structured JSON with the company information."""
         self.sheets_enabled = False
         
         try:
-            # Get credentials file and spreadsheet ID from environment
             credentials_file = os.getenv('GOOGLE_SHEETS_CREDENTIALS_FILE', 'credentials.json')
             self.spreadsheet_id = os.getenv('GOOGLE_SHEETS_SPREADSHEET_ID')
             
-            if not self.spreadsheet_id:
-                self.logger.warning("GOOGLE_SHEETS_SPREADSHEET_ID not found in environment variables")
+            if not self.spreadsheet_id or not os.path.exists(credentials_file):
                 return
             
-            if not os.path.exists(credentials_file):
-                self.logger.warning(f"Google Sheets credentials file not found: {credentials_file}")
-                return
-            
-            # Define the scope
             scope = [
                 'https://www.googleapis.com/auth/spreadsheets',
                 'https://www.googleapis.com/auth/drive'
             ]
             
-            # Authenticate and create the service
             creds = Credentials.from_service_account_file(credentials_file, scopes=scope)
             self.gc = gspread.authorize(creds)
-            
-            # Test connection by opening the spreadsheet
             self.spreadsheet = self.gc.open_by_key(self.spreadsheet_id)
             
             self.sheets_enabled = True
-            self.logger.info("Google Sheets integration enabled successfully")
+            self.logger.info("Google Sheets integration enabled")
             
         except Exception as e:
             self.logger.warning(f"Failed to setup Google Sheets: {e}")
@@ -182,7 +159,6 @@ Return structured JSON with the company information."""
     def extract_with_ai(self, url, html_content):
         """Extract data using ChatGroq AI."""
         try:
-            # Limit HTML content to avoid token limits
             limited_html = html_content[:15000] if html_content else ""
             
             input_data = {
@@ -195,8 +171,6 @@ Return structured JSON with the company information."""
             result = chain.invoke(input_data)
             
             self.stats['ai_extractions'] += 1
-            self.logger.info(f"AI extraction successful for {url}")
-            
             return result
             
         except Exception as e:
@@ -207,8 +181,6 @@ Return structured JSON with the company information."""
         """Manual extraction as backup when AI fails."""
         try:
             data = {}
-            
-            # Extract company name
             data['company_name'] = self.extract_company_name(soup)
             data['website'] = self.clean_url(url)
             data['email'] = self.extract_email(soup)
@@ -217,15 +189,13 @@ Return structured JSON with the company information."""
             data['description'] = self.extract_description(soup)
             data['category'] = self.extract_category(soup)
             
-            # Extract social links
             social_links = self.extract_social_links(soup)
             data['social_facebook'] = social_links.get('facebook')
             data['social_twitter'] = social_links.get('twitter')
             data['social_linkedin'] = social_links.get('linkedin')
             data['social_instagram'] = social_links.get('instagram')
             
-            data['confidence_score'] = 0.7  # Manual extraction confidence
-            
+            data['confidence_score'] = 0.7
             self.stats['manual_extractions'] += 1
             return data
             
@@ -268,7 +238,6 @@ Return structured JSON with the company information."""
         # Search in text
         text = soup.get_text()
         emails = email_pattern.findall(text)
-        # Filter out common noise
         for email in emails:
             if not any(noise in email.lower() for noise in ['example.com', 'test.com', 'admin@admin']):
                 return email
@@ -279,7 +248,6 @@ Return structured JSON with the company information."""
         """Extract phone number from soup."""
         phone_pattern = re.compile(r'(\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})|(\+?91[-.\s]?)?([0-9]{10})')
         
-        # Check tel links
         tel_links = soup.find_all('a', href=re.compile(r'^tel:'))
         for link in tel_links:
             phone = link.get('href').replace('tel:', '').strip()
@@ -373,7 +341,7 @@ Return structured JSON with the company information."""
             with open(csv_file, 'r', encoding='utf-8') as file:
                 reader = csv.DictReader(file)
                 for row in reader:
-                    # Look for URL in common column names
+                 
                     url = None
                     for col in ['url', 'URL', 'website', 'link']:
                         if col in row and row[col].strip():
@@ -419,82 +387,7 @@ Return structured JSON with the company information."""
                 text = re.sub(r'\n+', ' ', text)  # Replace multiple newlines with space
                 text = text.strip()
                 
-                # Check if we got meaningful content
                 if len(text.strip()) > 100:
-                    self.logger.info(f"✅ WebBaseLoader extracted {len(text)} characters")
-                    
-                    # Print scraped content details
-                    print("\n" + "="*80)
-                    print("🔍 WEBBASELOADER SCRAPED CONTENT DETAILS")
-                    print("="*80)
-                    print(f"📏 Content Length: {len(text)} characters")
-                    print(f"📄 First 500 characters:")
-                    print("-" * 50)
-                    print(text[:500])
-                    print("-" * 50)
-                    if len(text) > 1000:
-                        print(f"📄 Last 500 characters:")
-                        print("-" * 50)
-                        print(text[-500:])
-                        print("-" * 50)
-                    
-                    # Show some content analysis
-                    word_count = len(text.split())
-                    line_count = len(text.splitlines())
-                    print(f"📊 Word Count: {word_count}")
-                    print(f"📊 Line Count: {line_count}")
-                    
-                    # Check for social media links in the content
-                    social_patterns = {
-                        'Facebook': r'facebook\.com/[^\s<>"\']+',
-                        'Twitter/X': r'(?:twitter\.com|x\.com)/[^\s<>"\']+',
-                        'LinkedIn': r'linkedin\.com/[^\s<>"\']+',
-                        'Instagram': r'instagram\.com/[^\s<>"\']+',
-                        'YouTube': r'youtube\.com/[^\s<>"\']+',
-                    }
-                    
-                    print("🔗 Social Media Links Found:")
-                    for platform, pattern in social_patterns.items():
-                        matches = re.findall(pattern, text, re.IGNORECASE)
-                        if matches:
-                            print(f"  {platform}: {len(matches)} links")
-                            for match in matches[:3]:  # Show first 3 matches
-                                print(f"    - {match}")
-                            if len(matches) > 3:
-                                print(f"    ... and {len(matches) - 3} more")
-                        else:
-                            print(f"  {platform}: No links found")
-                    
-                    # Check for contact information
-                    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-                    phone_pattern = r'(\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})'
-                    
-                    emails = re.findall(email_pattern, text)
-                    phones = re.findall(phone_pattern, text)
-                    
-                    print("📧 Contact Information Found:")
-                    if emails:
-                        print(f"  Emails: {len(emails)} found")
-                        for email in emails[:3]:
-                            print(f"    - {email}")
-                        if len(emails) > 3:
-                            print(f"    ... and {len(emails) - 3} more")
-                    else:
-                        print("  Emails: None found")
-                        
-                    if phones:
-                        print(f"  Phones: {len(phones)} found")
-                        for phone in phones[:3]:
-                            phone_str = ''.join(phone) if isinstance(phone, tuple) else phone
-                            print(f"    - {phone_str}")
-                        if len(phones) > 3:
-                            print(f"    ... and {len(phones) - 3} more")
-                    else:
-                        print("  Phones: None found")
-                    
-                    print("="*80)
-                    print()
-                    
                     return text
                 else:
                     raise Exception("No meaningful content extracted")
@@ -510,33 +403,26 @@ Return structured JSON with the company information."""
         try:
             self.logger.info(f"Processing: {url}")
             
-            # Try WebBaseLoader first
             raw_html = self.scrape_with_webbaseloader(url)
             soup = None
             
             if raw_html:
-                # Create soup from WebBaseLoader content for manual extraction
                 soup = BeautifulSoup(raw_html, 'html.parser')
                 self.stats['successful_scrapes'] += 1
             else:
-                # Fallback to traditional scraper
-                self.logger.info(f"Falling back to traditional scraper for {url}")
                 soup, raw_html = self.scraper.scrape_url(url)
                 if not soup:
                     self.stats['failed_scrapes'] += 1
                     return None
                 self.stats['successful_scrapes'] += 1
             
-            # Try AI extraction first
             if self.ai_enabled and raw_html:
                 data = self.extract_with_ai(url, raw_html)
                 if data:
                     data['source_url'] = url
                     return data
             
-            # Fallback to manual extraction
             if soup:
-                self.logger.info(f"Using manual extraction for {url}")
                 data = self.extract_manually(soup, url)
                 if data:
                     data['source_url'] = url
@@ -560,17 +446,8 @@ Return structured JSON with the company information."""
             return False
         
         try:
-            # Debug: Print the raw companies data
-            self.logger.info(f"Raw companies data: {companies}")
-            
-            # Convert to DataFrame
             df = pd.DataFrame(companies)
             
-            # Debug: Print DataFrame info
-            self.logger.info(f"DataFrame shape: {df.shape}")
-            self.logger.info(f"DataFrame columns: {list(df.columns)}")
-            
-            # Reorder columns for better readability
             column_order = [
                 'company_name', 'website', 'email', 'phone', 'address', 
                 'description', 'category', 'social_facebook', 'social_twitter',
@@ -578,27 +455,19 @@ Return structured JSON with the company information."""
                 'employee_count', 'confidence_score', 'source_url'
             ]
             
-            # Keep only existing columns and add missing ones with None
             for col in column_order:
                 if col not in df.columns:
                     df[col] = None
             
             df = df[column_order]
             
-            # Get or create the worksheet
             try:
                 worksheet = self.spreadsheet.worksheet("Sheet1")
-                self.logger.info("Found existing Sheet1")
             except gspread.WorksheetNotFound:
                 worksheet = self.spreadsheet.add_worksheet(title="Sheet1", rows="1000", cols="20")
-                self.logger.info("Created new Sheet1")
             
-            # Clear existing data
             worksheet.clear()
-            
-            # Prepare data for upload
-            # Convert DataFrame to list of lists with headers
-            data_to_upload = [column_order]  # Headers
+            data_to_upload = [column_order]
             
             for _, row in df.iterrows():
                 row_data = []
@@ -606,17 +475,10 @@ Return structured JSON with the company information."""
                     try:
                         value = row[col]
                         
-                        # Handle None values
-                        if value is None:
+                        if value is None or pd.isna(value):
                             row_data.append("")
                             continue
                             
-                        # Handle pandas NA values
-                        if pd.isna(value):
-                            row_data.append("")
-                            continue
-                            
-                        # Handle lists/arrays
                         if isinstance(value, (list, tuple)):
                             if len(value) == 0:
                                 row_data.append("")
@@ -625,10 +487,8 @@ Return structured JSON with the company information."""
                                 row_data.append(", ".join(clean_items))
                             continue
                             
-                        # Handle numpy arrays
                         if hasattr(value, '__array__'):
                             try:
-                                # Convert array to list first
                                 array_list = value.tolist() if hasattr(value, 'tolist') else list(value)
                                 if len(array_list) == 0:
                                     row_data.append("")
@@ -639,7 +499,6 @@ Return structured JSON with the company information."""
                                 row_data.append(str(value))
                             continue
                             
-                        # Handle regular values
                         str_value = str(value).strip()
                         if str_value in ['nan', 'None', '']:
                             row_data.append("")
@@ -652,30 +511,15 @@ Return structured JSON with the company information."""
                         
                 data_to_upload.append(row_data)
             
-            # Upload data to Google Sheets
             worksheet.update(data_to_upload, value_input_option='USER_ENTERED')
             
-            # Format the header row
             worksheet.format('1:1', {
-                'backgroundColor': {
-                    'red': 0.2,
-                    'green': 0.6,
-                    'blue': 0.9
-                },
-                'textFormat': {
-                    'bold': True,
-                    'foregroundColor': {
-                        'red': 1.0,
-                        'green': 1.0,
-                        'blue': 1.0
-                    }
-                }
+                'backgroundColor': {'red': 0.2, 'green': 0.6, 'blue': 0.9},
+                'textFormat': {'bold': True, 'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0}}
             })
             
-            # Auto-resize columns
             worksheet.columns_auto_resize(0, len(column_order))
             
-            # Add timestamp
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             worksheet.update(values=[[f"Last updated: {timestamp}"]], range_name='A1000')
             
