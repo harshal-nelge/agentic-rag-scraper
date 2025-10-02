@@ -1,4 +1,4 @@
-# ObserveNow Assignment - Simplified Web Data Extraction
+# Simplified Web Data Extraction
 
 A streamlined system for scraping company data from websites and converting it to structured CSV using ChatGroq AI with manual extraction as backup.
 
